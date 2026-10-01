@@ -1,0 +1,17 @@
+# Python 3.10+ / 시스템에 ffmpeg 필요 (PATH 등록)
+anthropic>=1.0          # 팬튜브 디렉터(대본·제목·자막 생성)
+pyyaml>=6.0             # config.yaml
+pillow>=10.0            # 일본어 제목/자막 PNG 렌더링
+numpy>=1.26
+opencv-python-headless>=4.9   # 얼굴 검출(YuNet) → '얼빡' 크롭
+scenedetect>=0.6.4      # 장면 분할 (캡컷 '장면 분할' 대체)
+budoux>=0.6             # 일본어 자연스러운 줄바꿈 (보조)
+yt-dlp>=2025.1.1        # CC 라이선스 확인된 영상만 다운로드
+google-api-python-client>=2.100   # YouTube Data API v3 (검색/트렌드/업로드)
+google-auth-oauthlib>=1.2         # 업로드용 OAuth
+streamlit>=1.40            # 웹 UI (app.py)
+
+jsonschema>=4.0        # 중계 서버의 JSON 응답 검증
+pandas>=2.0            # app.py에서 직접 사용 (편집 표)
+# 테스트 전용: httpx2 (anthropic SDK와 함께 설치됨, tests/에서 HTTP 흉내)
+# 검증한 정확한 버전 조합은 constraints-tested.txt  →  pip install -r requirements.txt -c constraints-tested.txt

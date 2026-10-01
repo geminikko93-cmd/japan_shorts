@@ -1,0 +1,82 @@
+# ===== 일본 팬튜브 쇼츠 자동화 파라미터 =====
+# 영상에서 추출한 규칙을 그대로 수치화했습니다. (주석에 근거 타임코드)
+
+video:
+  width: 1080
+  height: 1920
+  fps: 30
+  target_duration: 30.0     # 목표 길이(초). 장면이 부족하면 억지로 채우지 않고 짧게 완성 (원본 강의는 9~10초 권장, 3:47)
+  max_duration: 32.0        # 절대 넘지 않는 길이. target_duration 이상이어야 함
+
+layout:
+  # 화면을 위에서부터 [제목 영역 | 영상 영역 | 자막 영역]으로 나눔. 추가 자막은 영상 아래 전용 영역에 들어가
+  # 원본 영상에 박힌 방송 자막과 겹치지 않음 (원본 자막 자체가 지워지지는 않음)
+  preset: "tall"            # tall = 4:5 영상(빈 공간 적음, 권장) / square = 기존 1:1 영상
+  presets:
+    square: {title_h: 430, video_h: 1080}   # 기존 배치: 제목 430 + 영상 1080 + 자막 410
+    tall:   {title_h: 300, video_h: 1350}   # 개선 배치: 제목 300 + 영상 1350 + 자막 270
+  side_margin: 48           # 글자 상자 좌우 최소 여백(px)
+  face_fill: 0.42           # 얼굴 높이가 크롭 높이에서 차지하는 비율 → '얼빡' 확대 (13:50)
+  headroom: 0.6             # 얼굴 박스 위로 최소 이만큼(얼굴 높이 배수) 남겨 머리카락이 잘리지 않게
+  max_upscale: 2.5          # 크롭 확대 배율 상한 (넘으면 화질이 뭉개지므로 덜 확대)
+  min_face_ratio: 0.04      # 이보다 작은 얼굴만 있는 장면은 버림 ("얼굴 들어가는 것만", 12:10)
+
+title:
+  font: "assets/fonts/KeinannPOP.ttf"   # けいなんポップ体 (SIL OFL, 상업 이용 무료). 비우면 OS 일본어 굵은 폰트 자동 탐색
+  size: 92
+  min_size_ratio: 0.75      # 안 들어가면 이 비율까지만 글자 축소. 그래도 안 되면 문구 수정 요청 (자동 생략 없음)
+  color: "#FFE600"          # "쨍한 노란색" (16:27)
+  stroke_color: "#000000"
+  stroke_width: 10
+  max_chars_per_line: 11    # 참고값 (실제 줄바꿈은 픽셀 폭 기준)
+
+subtitle:
+  font: "assets/fonts/KeinannPOP.ttf"
+  size: 74
+  min_size_ratio: 0.8
+  color: "#FFFFFF"
+  stroke_color: "#000000"
+  stroke_width: 8
+  box_color: [0, 0, 0, 150] # 자막 배경 깔기 (16:40)
+  max_chars_per_line: 13    # 참고값 (실제 줄바꿈은 픽셀 폭 기준)
+  chars_per_sec: 8.0        # 읽기 속도. 표시 시간 = 0.5초 + 글자수/속도 + 줄 추가당 0.3초
+  min_sec: 1.5              # 자막 1장당 1.5~2초가 기본 (17:25). 긴 자막은 max_sec까지 늘어남
+  max_sec: 3.0              # 이보다 길게 필요한 문구는 '줄이거나 시간 늘리기' 경고 (편집 화면에서 조정)
+
+audio:
+  # 기본 출력은 무음(원본 소리 제거, 효과음 없음). 업로드할 때 YouTube 앱 '사운드 추가'로 음악을 붙이세요.
+  music_path: ""            # 사용 권한이 있는 음원 파일을 직접 지정한 경우에만 BGM으로 들어감
+  music_start: 0.0          # 후렴(가장 많이 들은 부분) 시작 초 (11:02)
+  music_volume: 0.9
+
+timeline:
+  similar_hash_distance: 10 # 대표 프레임 지각 해시(64bit) 거리가 이 이하면 '시각적으로 같은 장면'
+  allow_similar_fallback: true  # 다른 장면이 모자라면 비슷한 장면을 허용(결과에 표시). false면 그냥 짧게 완성
+
+sources:
+  max_videos: 5             # 30초를 채우려면 소스가 더 필요 (원본 강의: 10초에 3개, 9:06)
+  require_cc: true          # 크리에이티브 커먼즈 필터 (8:44) — false로 바꾸지 마세요
+  region: "JP"              # 유튜브 재팬 (8:18)
+  language: "ja"
+  max_download_height: 1080
+  scene_threshold: 27.0     # PySceneDetect ContentDetector 임계값
+
+llm:
+  base_url: "https://codex.hungnguyen.codes"
+  json_mode: "prompt"      # 기본 호환 모드. 서버가 JSON schema를 지원하면 schema로 변경
+  timeout_seconds: 180
+  max_tokens: 16000
+  model: "claude-opus-5-5"
+  effort: "medium"        # json_mode: schema일 때 적용
+  n_captions: 30            # "자막도 30개" (6:40)
+  n_titles: 5
+
+trends:
+  region: "JP"
+  hours: 24                 # "24시간 동안 ... 조회수가 많이 증가" (24:45)
+  max_results: 50
+  rpm_usd: 0.05             # 쇼츠 1000회당 추정 수익(USD) — 채널마다 다름, 직접 보정
+  max_shorts_seconds: 180
+
+output_dir: "output"
+work_dir: "work"

@@ -1,0 +1,17 @@
+# 2026-10-02 이 버전 조합으로 tests/ 전체(55개)와 샘플 렌더를 실행해 확인했습니다.
+# 환경: Python 3.14.7 / Windows 11 (10.0.26200) / FFmpeg 9.0.2 (gyan.dev full build)
+# 다른 버전은 검증하지 않았습니다. 사용법: pip install -r requirements.txt -c constraints-tested.txt
+anthropic==1.11.0
+PyYAML==6.0.3
+pillow==11.3.0
+numpy==2.5.3
+opencv-python-headless==5.0.0.93
+scenedetect==0.7.1
+budoux==0.9.3
+yt-dlp==2026.8.19
+google-api-python-client==2.201.0
+google-auth-oauthlib==1.5.0
+streamlit==1.64.0
+pandas==3.0.6
+jsonschema==4.26.0
+httpx2==2.13.1
