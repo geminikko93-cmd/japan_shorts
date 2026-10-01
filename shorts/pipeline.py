@@ -19,7 +19,7 @@ from pathlib import Path
 from . import composer, director, publish, scenes, sources
 from .common import PipelineError, config_snapshot, log, require_ffmpeg, resolve, slugify
 from .layout import get_layout
-from .plan import EditPlan, auto_plan, new_plan, save_plan, validate_for_render
+from .plan import EditPlan, auto_plan, new_plan, save_plan, scene_filters, validate_for_render
 from .styles import LEGACY_STYLE
 
 
@@ -64,18 +64,21 @@ def analyze(cfg: dict, script: dict, srcs: list[sources.Source], run_dir: Path,
 
 def make_plan(cfg: dict, script: dict, clips: list[scenes.Clip], srcs: list[sources.Source], captions: list,
               title_idx: int, run_dir: Path, *, layout: str | None = None, style: str | None = None,
-              first_clip: str = "", climax_clip: str = "", exclude_sources: list[str] | None = None) -> EditPlan:
+              first_clip: str = "", climax_clip: str = "", exclude_sources: list[str] | None = None,
+              exclude_text: bool | None = None, exclude_static: bool | None = None) -> EditPlan:
     """captions: [{id, ja, ko, kind}] 또는 문자열 목록. style 미지정이면 기획안의 스타일(없으면 기존 동작)."""
     if not 0 <= title_idx < len(script["titles"]):
         raise PipelineError(f"제목 번호 범위 초과 (0~{len(script['titles']) - 1})")
     style = style or script.get("style") or LEGACY_STYLE
     lay = get_layout(cfg, layout)
+    flt = scene_filters(cfg, exclude_text, exclude_static)
     cuts, caps, notes = auto_plan(clips, captions, cfg, lay, style=style, first_clip=first_clip,
-                                  climax_clip=climax_clip, exclude_sources=exclude_sources)
+                                  climax_clip=climax_clip, exclude_sources=exclude_sources, filters=flt)
     t = script["titles"][title_idx]
     used = [s for s in srcs if s.path not in set(exclude_sources or [])]
     plan = new_plan(script.get("name_ja", ""), title_idx, (t["line1"], t["line2"]), lay, cfg, style, cuts, caps,
                     notes, used, run_dir, first_clip, exclude_sources)
+    plan.filters = flt
     save_plan(plan, run_dir / "edit_plan.json")
     return plan
 

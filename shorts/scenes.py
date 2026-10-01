@@ -54,6 +54,10 @@ class Clip:
     feat: np.ndarray | None = None  # 얼굴 임베딩 (동일 인물 필터 전용)
     scene_start: float | None = None   # 원래 장면 경계 (없으면 start/end와 같음)
     scene_end: float | None = None
+    text_score: float = 0.0   # 원본에 박힌 글자(자막·텔롭) 띠 비율 (3개 샘플 중앙값). 휴리스틱
+    has_text: bool = False    # 3개 샘플 중 2개 이상에서 글자 감지
+    motion: float = -1.0      # 0.4초 간격 두 프레임의 평균 밝기 변화 (-1 = 측정 안 함)
+    static: bool = False      # 정지 화면(사진 슬라이드쇼 등)으로 판단
 
     def __post_init__(self):
         if self.scene_start is None:
@@ -73,7 +77,8 @@ class Clip:
         return {"id": self.id, "source": self.source.path, "start": self.start, "end": self.end,
                 "score": round(self.score, 4), "face": list(self.face) if self.face else None,
                 "frame_size": list(self.frame_size), "fps": self.fps, "dhash": f"{self.dhash:016x}", "thumb": self.thumb,
-                "scene_start": self.scene_start, "scene_end": self.scene_end}
+                "scene_start": self.scene_start, "scene_end": self.scene_end, "text_score": round(self.text_score, 4),
+                "has_text": self.has_text, "motion": round(self.motion, 3), "static": self.static}
 
 
 def clip_from_dict(d: dict, sources_by_path: dict[str, Source]) -> Clip:
@@ -82,7 +87,50 @@ def clip_from_dict(d: dict, sources_by_path: dict[str, Source]) -> Clip:
     return Clip(d["id"], src, float(d["start"]), float(d["end"]), float(d["score"]),
                 tuple(d["face"]) if d.get("face") else None, tuple(d["frame_size"]), float(d.get("fps", 30.0)),
                 int(d.get("dhash", "0"), 16), d.get("thumb", ""), None,
-                d.get("scene_start"), d.get("scene_end"))
+                d.get("scene_start"), d.get("scene_end"), float(d.get("text_score", 0.0)),
+                bool(d.get("has_text", False)), float(d.get("motion", -1.0)), bool(d.get("static", False)))
+
+
+TEXT_BAND_MIN = 0.02     # 글자 띠 비율이 이 이상이면 '글자 있음' (샘플 보정값, 아래 text_score 참고)
+STATIC_MOTION = 0.5      # 0.4초 사이 평균 밝기 변화가 이보다 작으면 정지 화면
+
+
+def text_score(frame: np.ndarray) -> float:
+    """원본에 박힌 글자(자막·텔롭·슬라이드 문장) 띠의 화면 비율. 휴리스틱(OCR 아님).
+
+    세로 에지가 촘촘한 행이 화면 높이 3% 이상 이어지고, 그 에지가 폭의 30% 이상에 퍼져 있으면 글자 띠로 본다.
+    외곽선 있는 텔롭·자막은 행마다 세로 획이 몰려 있어 점수가 높고, 큰 로고 글자나 인물·배경은 낮게 나온다.
+    보정: 다운로드한 소스 5개에서 10프레임씩(50장) 눈으로 확인 — 포토콜(로고 포함) 10장 모두 0.0,
+    텔롭·슬라이드·TV 자막 프레임은 모두 0.029 이상. 작은 글자, 세로쓰기, 무늬가 촘촘한 배경에서는 틀릴 수 있다.
+    """
+    h0, w0 = frame.shape[:2]
+    g = cv2.cvtColor(cv2.resize(frame, (640, max(round(h0 * 640 / w0), 16)), interpolation=cv2.INTER_AREA),
+                     cv2.COLOR_BGR2GRAY)
+    H, W = g.shape
+    strong = (np.abs(cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)) > 120).astype(np.float32)
+    win = max(H // 60, 1)
+    hot = np.convolve(strong.mean(1), np.ones(win) / win, mode="same") >= 0.16
+    area, y = 0.0, 0
+    while y < H:
+        if not hot[y]:
+            y += 1
+            continue
+        y2 = y
+        while y2 < H and hot[y2]:
+            y2 += 1
+        if y2 - y >= 0.03 * H:
+            cols = strong[y:y2].reshape(y2 - y, 16, -1).mean(axis=(0, 2))
+            spread = float((cols >= 0.12).mean())
+            if spread >= 0.3:
+                area += (y2 - y) / H * spread
+        y = y2
+    return area
+
+
+def motion_between(a: np.ndarray, b: np.ndarray) -> float:
+    ga = cv2.cvtColor(cv2.resize(a, (160, 90), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY).astype(np.float32)
+    gb = cv2.cvtColor(cv2.resize(b, (160, 90), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY).astype(np.float32)
+    return float(np.abs(ga - gb).mean())
 
 
 def dhash(frame: np.ndarray) -> int:
@@ -191,12 +239,16 @@ class FaceRecognizer:
         return f / (np.linalg.norm(f) or 1.0)
 
 
-def keep_main_person(clips: list[Clip]) -> list[Clip]:
+def keep_main_person(clips: list[Clip], voters: list[Clip] | None = None) -> list[Clip]:
     """가장 많이 등장하는 얼굴과 다른 사람이 나오는 장면을 제거.
 
     '가장 많이 나온 얼굴 = 검색한 주인공'이라는 가정에 기댄 휴리스틱이다. 대상 인물 확인을 보장하지 않는다.
+    voters: 주인공을 정할 때 '투표'할 장면 (자동 제외될 자막 많은 영상·정지 화면은 빼서, 닮은 사람이 많이 나오는
+    다른 영상이 주인공을 바꾸지 못하게 함). 없으면 전체.
     """
-    have = [c for c in clips if c.feat is not None]
+    have = [c for c in (voters if voters else clips) if c.feat is not None]
+    if len(have) < 3:
+        have = [c for c in clips if c.feat is not None]
     if len(have) < 3:
         return clips
     F = np.stack([c.feat for c in have])
@@ -206,6 +258,8 @@ def keep_main_person(clips: list[Clip]) -> list[Clip]:
     center = group.mean(0)
     center /= np.linalg.norm(center) or 1.0
     kept = [c for c in clips if c.feat is None or float(c.feat @ center) >= SAME_PERSON_COS]
+    voters_kept = [c for c in have if float(c.feat @ center) >= SAME_PERSON_COS]
+    log.info("동일 인물 필터 기준: 투표 장면 %d개 중 %d개가 같은 얼굴", len(have), len(voters_kept))
     log.info("동일 인물 필터: 장면 %d개 → %d개 (다른 인물 %d개 제거)", len(clips), len(kept), len(clips) - len(kept))
     return kept or clips
 
@@ -255,11 +309,13 @@ def analyze(sources: list[Source], cfg: dict, model_dir: Path, thumb_dir: Path |
                 windows.append((wid, sa + j * step, sa + (j + 1) * step if j < n - 1 else sb, sa, sb))
         for cid, a, b, sa, sb in windows:
             faces, best, mid = [], None, None   # best = (얼굴 높이, 프레임, YuNet 행) → 임베딩용
+            texts = []
             for r in (0.25, 0.5, 0.75):
                 cap.set(cv2.CAP_PROP_POS_MSEC, (a + (b - a) * r) * 1000)
                 ok, frame = cap.read()
                 if not ok:
                     continue
+                texts.append(text_score(frame))
                 if r == 0.5 or mid is None:
                     mid = frame
                 found = det.largest_face(frame)
@@ -277,6 +333,13 @@ def analyze(sources: list[Source], cfg: dict, model_dir: Path, thumb_dir: Path |
                 face, score = None, 0.0
             if det.kind != "none" and score < lay["min_face_ratio"]:
                 continue   # 얼굴이 안 나오거나 너무 작은 장면은 버림
+            # 정지 화면: 가운데 프레임과 0.4초 뒤 프레임 비교 (사진 슬라이드쇼·멈춘 화면)
+            t_mid = a + (b - a) * 0.5
+            cap.set(cv2.CAP_PROP_POS_MSEC, min(t_mid + 0.4, b) * 1000)
+            ok, later = cap.read()
+            motion = motion_between(mid, later) if ok else -1.0
+            tscore = float(np.median(texts)) if texts else 0.0
+            has_text = sum(t >= TEXT_BAND_MIN for t in texts) >= 2
             thumb = ""
             if thumb_dir:
                 kf = THUMB_SIDE / max(fw, fh)
@@ -289,16 +352,33 @@ def analyze(sources: list[Source], cfg: dict, model_dir: Path, thumb_dir: Path |
             feat = rec.embed(best[1], best[2]) if rec and best else None
             clips.append(Clip(cid, src, float(np.ceil(a * 1e4) / 1e4), float(np.floor(b * 1e4) / 1e4), score, face,
                               (fw, fh), float(src_fps), dhash(mid), thumb, feat,
-                              float(np.ceil(sa * 1e4) / 1e4), float(np.floor(sb * 1e4) / 1e4)))
+                              float(np.ceil(sa * 1e4) / 1e4), float(np.floor(sb * 1e4) / 1e4),
+                              tscore, has_text, motion, 0 <= motion < STATIC_MOTION))
             kept += 1
         cap.release()
         log.info("%s: 장면 %d개 (후보 구간 %d개) 중 %d개 사용 (검출기=%s)", Path(src.path).name, len(scenes),
                  len(windows), kept, det.kind)
-        info["per_source"][src.path] = {"scenes": len(scenes), "windows": len(windows), "kept": kept}
+        mine = [c for c in clips if c.source is src]
+        n_text = sum(c.has_text for c in mine)
+        n_static = sum(c.static for c in mine)
+        info["per_source"][src.path] = {"scenes": len(scenes), "windows": len(windows), "kept": kept,
+                                        "text": n_text, "static": n_static,
+                                        "text_ratio": round(n_text / len(mine), 3) if mine else 0.0}
+        log.info("  글자 감지 %d개 / 정지 화면 %d개 (사용 장면 %d개 중)", n_text, n_static, len(mine))
 
     if not clips:
         raise PipelineError("얼굴이 충분히 나온 장면이 없습니다. 다른 소스 영상을 사용하세요.")
-    kept_main = keep_main_person(clips)
+    tl = cfg.get("timeline", {})
+    voters = clips
+    if tl.get("exclude_text_scenes", True) or tl.get("exclude_static_scenes", True):
+        ratio = {p: v.get("text_ratio", 0) for p, v in info["per_source"].items()}
+        heavy = ({p for p, r in ratio.items() if r >= float(tl.get("text_source_ratio", 0.3))}
+                 if tl.get("exclude_text_scenes", True) else set())
+        voters = [c for c in clips if c.source.path not in heavy
+                  and not (tl.get("exclude_text_scenes", True) and c.has_text)
+                  and not (tl.get("exclude_static_scenes", True) and c.static)]
+        info["person_voters"] = len(voters)
+    kept_main = keep_main_person(clips, voters)
     info["person_filter_removed"] = len(clips) - len(kept_main)
     return order_clips(kept_main)
 

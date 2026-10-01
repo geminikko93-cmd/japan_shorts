@@ -14,7 +14,7 @@ layout:
   preset: "tall"            # tall = 4:5 영상(빈 공간 적음, 권장) / square = 기존 1:1 영상
   presets:
     square: {title_h: 430, video_h: 1080}   # 기존 배치: 제목 430 + 영상 1080 + 자막 410
-    tall:   {title_h: 300, video_h: 1350}   # 개선 배치: 제목 300 + 영상 1350 + 자막 270
+    tall:   {title_h: 320, video_h: 1280}   # 개선 배치: 제목 320 + 영상 1280 + 자막 320 (큰 자막 2줄이 들어가는 높이)
   side_margin: 48           # 글자 상자 좌우 최소 여백(px)
   face_fill: 0.42           # 얼굴 높이가 크롭 높이에서 차지하는 비율 → '얼빡' 확대 (13:50)
   headroom: 0.6             # 얼굴 박스 위로 최소 이만큼(얼굴 높이 배수) 남겨 머리카락이 잘리지 않게
@@ -23,7 +23,7 @@ layout:
 
 title:
   font: "assets/fonts/KeinannPOP.ttf"   # けいなんポップ体 (SIL OFL, 상업 이용 무료). 비우면 OS 일본어 굵은 폰트 자동 탐색
-  size: 92
+  size: 100
   min_size_ratio: 0.75      # 안 들어가면 이 비율까지만 글자 축소. 그래도 안 되면 문구 수정 요청 (자동 생략 없음)
   color: "#FFE600"          # "쨍한 노란색" (16:27)
   stroke_color: "#000000"
@@ -32,12 +32,12 @@ title:
 
 subtitle:
   font: "assets/fonts/KeinannPOP.ttf"
-  size: 74
+  size: 84
   min_size_ratio: 0.8
   color: "#FFFFFF"
   stroke_color: "#000000"
   stroke_width: 8
-  box_color: [0, 0, 0, 150] # 자막 배경 깔기 (16:40)
+  box_color: [0, 0, 0, 190] # 자막 배경 깔기 (16:40). 진할수록 밝은 배경에서도 잘 읽힘
   max_chars_per_line: 13    # 참고값 (실제 줄바꿈은 픽셀 폭 기준)
   chars_per_sec: 8.0        # 읽기 속도. 표시 시간 = 0.5초 + 글자수/속도 + 줄 추가당 0.3초
   min_sec: 1.5              # 자막 1장당 1.5~2초가 기본 (17:25). 긴 자막은 max_sec까지 늘어남
@@ -52,6 +52,9 @@ audio:
 timeline:
   similar_hash_distance: 10 # 대표 프레임 지각 해시(64bit) 거리가 이 이하면 '시각적으로 같은 장면'
   allow_similar_fallback: true  # 다른 장면이 모자라면 비슷한 장면을 허용(결과에 표시). false면 그냥 짧게 완성
+  exclude_text_scenes: true     # 원본에 자막·텔롭·글자가 박힌 장면 자동 제외 (휴리스틱, 편집 화면에서 끌 수 있음)
+  text_source_ratio: 0.3        # 장면의 이 비율 이상에서 글자가 감지된 영상은 통째로 제외
+  exclude_static_scenes: true   # 사진 슬라이드쇼·멈춘 화면 자동 제외
 
 sources:
   max_videos: 5             # 30초를 채우려면 소스가 더 필요 (원본 강의: 10초에 3개, 9:06)

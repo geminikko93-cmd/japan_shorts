@@ -537,12 +537,19 @@ class TextLayoutTests(unittest.TestCase):
             for style in STYLES:
                 cfg = styled_cfg(self.cfg, style)
                 lay = get_layout(cfg, preset)
-                text = "この笑顔を見るだけで今日一日がんばれる気がする件について"
+                text = "この笑顔を見るだけで今日もがんばれる"            # 생성 상한(20자) 길이
                 fit = fit_subtitle(text, cfg, lay)
                 self.assertEqual("".join(fit.lines), text)
                 self.assertGreater(len(fit.lines), 1)
                 self.assertTrue(all(ln[0] not in "、。！？ーっ」』）" for ln in fit.lines), fit.lines)
                 self.assertLessEqual(max(fit.widths), lay.text_w)
+                self.assertEqual(fit.size, cfg["subtitle"]["size"], "20자 자막은 줄이지 않은 크기로 들어가야 함")
+                long = "この笑顔を見るだけで今日一日がんばれる気がする件について"
+                if preset == "tall":                                       # 4:5 자막 영역에는 안 들어감 → 수정 요청
+                    with self.assertRaises(TextFitError):
+                        fit_subtitle(long, cfg, lay)
+                else:                                                      # 정사각(410px)은 3줄로 들어감, 생략 없음
+                    self.assertEqual("".join(fit_subtitle(long, cfg, lay).lines), long)
 
     def test_too_long_or_empty_caption_is_error_not_truncated(self):
         lay = get_layout(self.cfg, "tall")
@@ -555,8 +562,9 @@ class TextLayoutTests(unittest.TestCase):
         lay = get_layout(self.cfg, "tall")
         fit = fit_subtitle("え、待って！？この顔は反則でしょ…！", self.cfg, lay)
         self.assertEqual("".join(fit.lines), "え、待って！？この顔は反則でしょ…！")
-        t = fit_title("本田翼の透明感は", "国宝級と言っても過言ではない", self.cfg, lay)
-        self.assertEqual("".join(t.lines), "本田翼の透明感は国宝級と言っても過言ではない")
+        t = fit_title("本田翼の透明感は", "国宝級すぎる笑顔", self.cfg, lay)          # 한 줄 11자 안팎
+        self.assertEqual("".join(t.lines), "本田翼の透明感は国宝級すぎる笑顔")
+        self.assertEqual(len(t.lines), 2)
         long2 = ("本田翼の透明感は", "もはや国宝級と言っても過言ではない件")
         with self.assertRaises(TextFitError):
             fit_title(*long2, self.cfg, lay)
@@ -625,6 +633,49 @@ class TextLayoutTests(unittest.TestCase):
             self.assertGreaterEqual(y + h, fy + fh, "턱이 잘림")
             self.assertLessEqual(y, max(fy - 0.6 * fh, 0) + 2, "머리 위 여백 부족")
             self.assertLessEqual(lay.video_h / h, self.cfg["layout"]["max_upscale"] + 0.01)
+
+
+class SceneFilterTests(unittest.TestCase):
+    def _frame(self, text: str | None):
+        from PIL import Image, ImageDraw, ImageFont
+        rng = np.random.default_rng(0)
+        base = (np.linspace(60, 200, 1280)[None, :, None] * np.ones((720, 1, 3))).astype(np.uint8)
+        base = np.clip(base + rng.normal(0, 4, base.shape), 0, 255).astype(np.uint8)   # 약한 노이즈 배경
+        im = Image.fromarray(base)
+        d = ImageDraw.Draw(im)
+        d.ellipse((520, 150, 760, 450), fill=(210, 170, 150))                         # 얼굴 비슷한 덩어리
+        if text:
+            font = ImageFont.truetype(str(ROOT / "assets/fonts/KeinannPOP.ttf"), 64)
+            d.text((140, 560), text, font=font, fill=(255, 230, 0), stroke_width=6, stroke_fill=(30, 30, 30))
+        return np.array(im)[:, :, ::-1].copy()
+
+    def test_text_score_separates_telop(self):
+        from shorts.scenes import TEXT_BAND_MIN, text_score
+        self.assertLess(text_score(self._frame(None)), TEXT_BAND_MIN)
+        self.assertGreaterEqual(text_score(self._frame("なれます！なれます！絶対になれます！")), TEXT_BAND_MIN)
+
+    def test_static_motion(self):
+        from shorts.scenes import STATIC_MOTION, motion_between
+        f = self._frame(None)
+        self.assertLess(motion_between(f, f.copy()), STATIC_MOTION)
+        g = np.roll(f, 40, axis=1)
+        self.assertGreater(motion_between(f, g), STATIC_MOTION)
+
+    def test_filter_clips_drops_text_scenes_sources_and_static(self):
+        from shorts.plan import filter_clips, scene_filters
+        cfg = base_cfg(Path(tempfile.gettempdir()))
+        a = [Clip(f"A{i}", Source(path="a.mp4"), i * 3.0, i * 3.0 + 3, 0.2, None, (W, H), 30.0, i, "", None,
+                  None, None, 0.05 if i < 2 else 0.0, i < 2) for i in range(5)]          # 40% 글자 → 영상 통째로 제외
+        b = [Clip(f"B{i}", Source(path="b.mp4"), i * 3.0, i * 3.0 + 3, 0.2, None, (W, H), 30.0, 10 + i, "", None,
+                  None, None, 0.0, i == 0, 0.1 if i == 1 else 3.0, i == 1) for i in range(6)]   # 1개 글자, 1개 정지
+        out, notes, gone = filter_clips(a + b, scene_filters(cfg))
+        self.assertEqual(gone, ["a.mp4"])
+        self.assertEqual([c.id for c in out], ["B2", "B3", "B4", "B5"])
+        self.assertTrue(any("휴리스틱" in n for n in notes))
+        out, _, _ = filter_clips(a + b, scene_filters(cfg), keep={"A0"})                # 사람이 고른 첫 컷은 유지
+        self.assertIn("A0", [c.id for c in out])
+        out, _, gone = filter_clips(a + b, scene_filters(cfg, exclude_text=False, exclude_static=False))
+        self.assertEqual((len(out), gone), (11, []))
 
 
 class ScriptAndSourceTests(unittest.TestCase):

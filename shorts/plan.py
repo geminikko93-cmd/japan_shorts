@@ -83,6 +83,7 @@ class EditPlan:
     audio: dict = field(default_factory=dict)   # 기준 곡·파일·오프셋·마커·타이밍 확인 상태
     title_review: dict | None = None
     source_stats: list = field(default_factory=list)   # 계획을 만들 때 소스 파일 [경로, 크기, 수정시각]
+    filters: dict = field(default_factory=dict)        # 자동 제외 설정 (글자 장면·정지 화면·자막 많은 소스)
     version: int = PLAN_VERSION
     created: str = ""
 
@@ -328,9 +329,49 @@ def _norm_captions(captions: list) -> list[dict]:
     return out
 
 
+def scene_filters(cfg: dict, exclude_text: bool | None = None, exclude_static: bool | None = None) -> dict:
+    tl = cfg.get("timeline", {})
+    return {"exclude_text": bool(tl.get("exclude_text_scenes", True) if exclude_text is None else exclude_text),
+            "text_source_ratio": float(tl.get("text_source_ratio", 0.3)),
+            "exclude_static": bool(tl.get("exclude_static_scenes", True) if exclude_static is None else exclude_static)}
+
+
+def filter_clips(clips: list[Clip], flt: dict, keep: set[str] = frozenset()) -> tuple[list[Clip], list[str], list[str]]:
+    """글자 있는 장면, 글자가 많은 소스 전체, 정지 화면을 뺌 → (남은 장면, 메모, 통째로 뺀 소스). keep은 사람이 고른 장면."""
+    notes, text_sources = [], []
+    if flt.get("exclude_text"):
+        by_src: dict[str, list[Clip]] = {}
+        for c in clips:
+            by_src.setdefault(c.source.path, []).append(c)
+        for path, cs in by_src.items():
+            ratio = sum(c.has_text for c in cs) / len(cs)
+            if ratio >= flt.get("text_source_ratio", 0.3):
+                text_sources.append(path)
+                notes.append(f"자막·글자가 많은 영상 제외: {Path(path).name} (장면 {ratio * 100:.0f}%에서 글자 감지)")
+    out, n_text, n_static = [], 0, 0
+    for c in clips:
+        if c.id in keep:
+            out.append(c)
+        elif c.source.path in text_sources:
+            continue
+        elif flt.get("exclude_text") and c.has_text:
+            n_text += 1
+        elif flt.get("exclude_static") and c.static:
+            n_static += 1
+        else:
+            out.append(c)
+    if n_text:
+        notes.append(f"원본 글자가 감지된 장면 {n_text}개 제외")
+    if n_static:
+        notes.append(f"정지 화면(사진·멈춘 화면) {n_static}개 제외")
+    if notes:
+        notes.append("글자·정지 화면 감지는 휴리스틱이라 틀릴 수 있습니다. 미리보기에서 확인하세요.")
+    return out, notes, text_sources
+
+
 def auto_plan(clips: list[Clip], captions: list, cfg: dict, lay: Layout, *, style: str = LEGACY_STYLE,
-              first_clip: str = "", climax_clip: str = "", exclude_sources: list[str] | None = None
-              ) -> tuple[list[VideoClipEvent], list[CaptionEvent], list[str]]:
+              first_clip: str = "", climax_clip: str = "", exclude_sources: list[str] | None = None,
+              filters: dict | None = None) -> tuple[list[VideoClipEvent], list[CaptionEvent], list[str]]:
     """스타일 프리셋에 따라 컷과 자막을 배치. (컷, 자막, 메모) 반환. 내용 기반 매칭은 하지 않는다."""
     fps = int(cfg["video"]["fps"])
     target, maxd = durations(cfg)
@@ -341,8 +382,11 @@ def auto_plan(clips: list[Clip], captions: list, cfg: dict, lay: Layout, *, styl
         raise PipelineError("사용할 자막이 없습니다. ② 탭에서 칭찬글을 체크하세요.")
     excl = set(exclude_sources or [])
     pool = [c for c in clips if c.source.path not in excl]
+    flt = filters if filters is not None else scene_filters(cfg)
+    pool, fnotes, _ = filter_clips(pool, flt, {first_clip, climax_clip} - {""})
     if not pool:
-        raise PipelineError("사용할 수 있는 장면이 없습니다 (모든 소스가 제외되었거나 얼굴 장면 없음).")
+        raise PipelineError("사용할 수 있는 장면이 없습니다 (모든 소스가 제외되었거나, 얼굴 장면이 없거나, "
+                            "남은 장면이 모두 자막·글자/정지 화면으로 감지됨 — 자동 제외를 끄거나 다른 소스를 쓰세요).")
     by_id = {c.id: c for c in pool}
     for name, cid in (("첫 컷", first_clip), ("핵심 컷", climax_clip)):
         if cid and cid not in by_id:
@@ -364,6 +408,7 @@ def auto_plan(clips: list[Clip], captions: list, cfg: dict, lay: Layout, *, styl
     n_rel = sum(1 for c in cuts if c.relaxed)
     if n_rel:
         notes.append(f"중복 제한 완화: {n_rel}개 컷이 이미 쓴 장면과 비슷함 (편집 화면에서 교체 가능)")
+    notes += fnotes
     log.info("타임라인(%s): 컷 %d개, 자막 %d개, 총 %.2f초 %s", style, len(cuts), len(events), total, " / ".join(notes))
     return cuts, events, notes
 

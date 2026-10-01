@@ -419,7 +419,8 @@ def build_plan(style: str, first_clip: str = "", exclude: list[str] | None = Non
     clips = [an["clips"][i] for i in an["order"]]
     return pipeline.make_plan(cfg, ss.script, clips, an["srcs"], ss.get("captions") or [],
                               ss.get("title_idx", 0), Path(an["run_dir"]), layout=layout, style=style,
-                              first_clip=first_clip, exclude_sources=exclude)
+                              first_clip=first_clip, exclude_sources=exclude,
+                              exclude_text=ss.get("flt_text"), exclude_static=ss.get("flt_static"))
 
 
 def analyze_and_plan(srcs: list, style: str) -> None:
@@ -525,6 +526,16 @@ with tab3:
         ss.style_pick = default_style
     style_now = st.selectbox("편집 스타일", style_names(), key="style_pick", format_func=style_label,
                              help="기존 기획안·계획은 불러오기만으로 스타일을 바꾸지 않습니다. 바꾸려면 아래에서 미리보기 후 적용하세요.")
+
+    tl_cfg = cfg.get("timeline", {})
+    f1, f2 = st.columns(2)
+    f1.checkbox("원본에 자막·텔롭이 박힌 장면/영상 자동 제외", key="flt_text",
+                value=bool(tl_cfg.get("exclude_text_scenes", True)),
+                help=f"장면 {int(float(tl_cfg.get('text_source_ratio', 0.3)) * 100)}% 이상에서 글자가 보이면 그 영상은 통째로 뺍니다. "
+                     "글자 모양을 보는 간단한 감지라 틀릴 수 있으니 썸네일의 📝 표시로 확인하세요.")
+    f2.checkbox("사진 슬라이드쇼·멈춘 화면 자동 제외", key="flt_static",
+                value=bool(tl_cfg.get("exclude_static_scenes", True)),
+                help="0.4초 사이 화면이 거의 안 바뀌는 장면(🖼)을 뺍니다. 바꾼 뒤에는 '다시 자동 배치'를 누르세요.")
 
     # ── 1단계: 소스 → 장면 분석 + 자동 배치 (렌더는 하지 않음)
     st.markdown("#### 1. 소스 고르고 장면 분석")
@@ -695,7 +706,12 @@ with tab3:
             excl = []
             for spath, label_ in names.items():
                 ids = [i for i in an["order"] if clips[i].source.path == spath]
-                st.markdown(f"**{label_}** — 장면 {len(ids)}개")
+                n_t = sum(clips[i].has_text for i in ids)
+                n_s = sum(clips[i].static for i in ids)
+                ratio = n_t / len(ids) if ids else 0
+                auto_out = (plan.filters.get("exclude_text") and ratio >= plan.filters.get("text_source_ratio", 0.3))
+                st.markdown(f"**{label_}** — 장면 {len(ids)}개 · 📝 글자 감지 {n_t}개 · 🖼 정지 화면 {n_s}개"
+                            + (" · **자막 많은 영상 → 자동 제외됨**" if auto_out else ""))
                 if st.checkbox("이 소스 제외 (원본 자막·글자가 많거나 다른 인물)", key=f"ex_{spath}",
                                value=spath in plan.excluded_sources):
                     excl.append(spath)
@@ -705,7 +721,8 @@ with tab3:
                         uri = thumb_uri(clips[cid], plan.layout, 120)
                         if uri:
                             st.image(uri, width="stretch")
-                        st.caption(f"{cid} · {clips[cid].duration:.1f}초")
+                        st.caption(f"{cid} · {clips[cid].duration:.1f}초" + (" 📝" if clips[cid].has_text else "")
+                                   + (" 🖼" if clips[cid].static else ""))
                         if st.button("첫 컷", key=f"first_{cid}", width="stretch"):
                             set_first_clip(plan, cid, clips)
                             st.rerun()

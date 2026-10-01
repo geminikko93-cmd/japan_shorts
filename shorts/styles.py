@@ -41,10 +41,10 @@ STYLES: dict[str, dict] = {
             {"until": 28, "cut": "key", "note": "가장 기억에 남는 표정·행동을 충분히"},
             {"until": 999, "cut": "normal", "note": "자연스러운 끝맺음 (억지 루프 없음)"},
         ],
-        "title": {"size": 66, "color": "#FFFFFF", "accent_color": "#FFD9E4", "stroke_color": "#000000",
-                  "stroke_width": 6, "min_size_ratio": 0.75},
-        "subtitle": {"size": 62, "color": "#FFFFFF", "stroke_color": "#000000", "stroke_width": 5,
-                     "box_color": [0, 0, 0, 110], "min_size_ratio": 0.8},
+        "title": {"size": 96, "color": "#FFFFFF", "accent_color": "#FFD9E4", "stroke_color": "#000000",
+                  "stroke_width": 8, "min_size_ratio": 0.75},
+        "subtitle": {"size": 84, "color": "#FFFFFF", "stroke_color": "#000000", "stroke_width": 7,
+                     "box_color": [0, 0, 0, 190], "min_size_ratio": 0.8},
         "prompt_ja": (
             "チャンネルの口調: 成人の俳優を好きなファンの、短く落ち着いた口語。広告コピー、流行語の羅列、"
             "キャラクターの口調、敬語とタメ口の混在は避ける。自然な口語の省略はそのままでよい。\n"
