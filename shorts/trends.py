@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .common import PipelineError, log
-from .sources import _iso_seconds, _youtube
+from .sources import _iso_seconds, _youtube, yt_error
 
 CATEGORY_NAMES = {
     "1": "영화/애니", "2": "자동차", "10": "음악", "15": "동물", "17": "스포츠", "19": "여행",
@@ -41,7 +41,7 @@ def scan(cfg: dict, queries: list[str], out_csv: Path) -> list[dict]:
                 maxResults=min(tc["max_results"], 50),
             ).execute()
         except HttpError as e:
-            raise PipelineError(f"트렌드 검색 실패 ({q}): {e}") from e
+            raise yt_error(e, f"트렌드 검색 '{q}'") from e
         ids += [it["id"]["videoId"] for it in res.get("items", []) if it["id"]["videoId"] not in ids]
 
     rows = []

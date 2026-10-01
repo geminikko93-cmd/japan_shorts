@@ -63,8 +63,9 @@ def cmd_make(cfg: dict, a: argparse.Namespace) -> Path | None:
     if a.sources_dir:
         srcs = sources.from_local_dir(Path(a.sources_dir))
     else:
-        cands = sources.search_cc_videos(script["search_keywords_ja"] or [script["name_ja"]], cfg)
-        srcs = sources.download(cands, work / "src", cfg)
+        names = [script.get("name_ja", ""), script.get("name_ko", "")]
+        cands = sources.search_cc_videos(sources.expand_keywords(script, cfg=cfg), cfg, names=names)
+        srcs = sources.download(sources.rank_for_auto(cands, names), work / "src", cfg)
 
     captions = script["captions"][a.caption_start:]
     run_dir = pipeline.new_run_dir(cfg, script)
@@ -94,6 +95,17 @@ def _finish(cfg: dict, a: argparse.Namespace, out: Path, meta: dict, job: Path) 
         publish.upload(out, meta, resolve(cfg, "secrets/client_secret.json"),
                        resolve(cfg, "secrets/token.json"), privacy="private")
     print(f"\n완성 영상: {out}\n작업 폴더: {out.parent} (metadata.json·edit_plan.json·job.json 포함)")
+
+
+def cmd_cc_check(cfg: dict, a: argparse.Namespace) -> None:
+    """인물별 CC 영상 미리 확인 (다운로드 없음, 검색어 3개 = 약 300 units, 같은 검색은 24시간 캐시)."""
+    for name in a.person:
+        ja, _, ko = name.partition("/")
+        r = sources.check_person({"name_ja": ja.strip(), "name_ko": ko.strip()}, cfg)
+        print(f"\n[{ja}] CC 영상 {r['total']}개 · 쓸 만해 보이는 것 {r['likely']}개 "
+              f"(API 약 {r['units']} units, 저장된 결과 {r['cached']}회) — 검색어 {', '.join(r['keywords'])}")
+        for t in r["top"]:
+            print(f"  - {t['title'][:60]} ({t['seconds'] // 60}:{t['seconds'] % 60:02d}) {t['url']}  {' / '.join(t['flags'])}")
 
 
 def cmd_batch(cfg: dict, a: argparse.Namespace) -> None:
@@ -144,6 +156,9 @@ def main() -> int:
     p.add_argument("--plan-only", action="store_true", help="분석·자동 배치만 하고 edit_plan.json 저장 (렌더 안 함)")
     p.add_argument("--plan", help="저장된 edit_plan.json을 그대로 렌더 (script.json은 같은 폴더 또는 --script)")
 
+    p = sub.add_parser("cc-check", help="인물별 CC 영상 미리 확인 (다운로드 없음)")
+    p.add_argument("--person", action="append", required=True, help='일본어 이름 또는 "일본어/한국어" (여러 번 가능)')
+
     p = sub.add_parser("batch", help="people.txt의 인물별로 연속 제작")
     p.add_argument("--file", required=True)
     p.add_argument("--upload", action="store_true")
@@ -156,7 +171,8 @@ def main() -> int:
         cfg = load_config(a.config)
         if a.cmd == "make" and not (a.person or a.script or a.plan):
             raise PipelineError("--person, --script, --plan 중 하나는 필요합니다.")
-        {"trends": cmd_trends, "script": cmd_script, "make": cmd_make, "batch": cmd_batch}[a.cmd](cfg, a)
+        {"trends": cmd_trends, "script": cmd_script, "make": cmd_make, "batch": cmd_batch,
+         "cc-check": cmd_cc_check}[a.cmd](cfg, a)
     except PipelineError as e:
         log.error("%s", e)
         return 1

@@ -59,8 +59,11 @@ timeline:
 sources:
   max_videos: 5             # 30초를 채우려면 소스가 더 필요 (원본 강의: 10초에 3개, 9:06)
   require_cc: true          # 크리에이티브 커먼즈 필터 (8:44) — false로 바꾸지 마세요
-  region: "JP"              # 유튜브 재팬 (8:18)
-  language: "ja"
+  region: "JP"              # 일본에서 볼 수 있는 영상만 (8:18). 업로더 국적 제한은 아님
+  relevance_language: ""    # 비우면 언어 가중치 없음 (한국 언론·행사 채널의 CC 영상도 잡힘). 예전 값 "ja"
+  max_keywords: 6           # CC 검색어 개수 (이름, 이름+イベント/舞台挨拶, 한국어 이름, 한국어 이름+포토콜 …)
+  search_pages: 1           # 검색어마다 볼 페이지 수 (1페이지 = 50개 = 100 units)
+  search_cache_hours: 24    # 같은 검색은 이 시간 동안 저장된 결과 재사용 (할당량 절약)
   max_download_height: 1080
   scene_threshold: 27.0     # PySceneDetect ContentDetector 임계값
 

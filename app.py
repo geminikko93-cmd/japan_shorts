@@ -216,6 +216,24 @@ with tab1:
                 st.write(p["reason_ko"])
                 if p.get("known_for_ko"):
                     st.caption("대표작: " + " · ".join(p["known_for_ko"]))
+                cc = p.get("cc")
+                if cc:
+                    st.markdown(f"**CC 영상 {cc['total']}개 · 쓸 만해 보이는 것 {cc['likely']}개**"
+                                + (" ✅" if cc["likely"] >= 3 else " ⚠️ 소스 부족" if cc["likely"] == 0 else ""))
+                    st.caption(f"{cc['checked']} 확인 · 검색어 {', '.join(cc['keywords'])} · 제목·설명·길이만 본 판단 "
+                               "(받아서 분석하면 자막·정지 화면으로 더 빠질 수 있음)")
+                    for t_ in cc.get("top", [])[:3]:
+                        st.markdown(f"- [{t_['title'][:40]}]({t_['url']}) · {t_['seconds'] // 60}:{t_['seconds'] % 60:02d}")
+                if st.button("🔍 CC 영상 확인" + (" (다시)" if cc else "") + " · 약 300 units", key=f"cc_{i}",
+                             width="stretch", help="검색어 3개로 CC 영상이 얼마나 있는지 확인합니다 (다운로드 없음). "
+                                                   "같은 검색은 24시간 동안 저장된 결과를 다시 써서 할당량을 쓰지 않습니다."):
+                    def _check(p=p):
+                        r = sources.check_person({"name_ja": p["name_ja"], "name_ko": p["name_ko"]}, cfg)
+                        p["cc"] = r
+                        rec_file.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+                        return r
+                    if run_step(f"{p['name_ko']} CC 영상 확인", _check):
+                        st.rerun()
                 a, b = st.columns(2)
                 a.link_button("📰 최근 뉴스", "https://www.google.com/search?tbm=nws&q="
                               + urllib.parse.quote(p["name_ja"]), width="stretch")
@@ -545,11 +563,13 @@ with tab3:
                     horizontal=True)
     keywords: list[str] = []
     if not mode.startswith("📁"):
-        kw = st.text_input("검색 키워드 (일본어로 검색해야 결과가 많습니다 · 쉼표로 구분)",
-                           ", ".join(script.get("search_keywords_ja") or [script["name_ja"]]))
-        if script.get("search_keywords_ko"):
-            st.caption("뜻: " + ", ".join(script["search_keywords_ko"]))
+        kw = st.text_input("검색 키워드 (쉼표로 구분 · 이름, 이름+행사어, 한국어 이름을 기본으로 넣었습니다. "
+                           "로마자 이름 등을 더해도 됩니다)", ", ".join(sources.expand_keywords(script, cfg=cfg)))
         keywords = [k.strip() for k in kw.split(",") if k.strip()]
+        pages = int(cfg["sources"].get("search_pages", 1))
+        st.caption(f"예상 할당량: 검색어 {len(keywords)}개 × {pages}페이지 = 약 {sources.estimate_units(len(keywords), pages)} "
+                   f"units (하루 10,000 · 같은 검색은 {cfg['sources'].get('search_cache_hours', 24)}시간 동안 저장된 결과를 써서 0). "
+                   "CC 영상은 일본 방송보다 한국 언론·행사 채널이 올린 것이 많습니다.")
 
     if mode.startswith("🤖"):
         st.caption(f"CC 라이선스 영상을 검색해 제목에 이름이 들어간 영상부터 최대 {max_v}개 받고, "
@@ -557,7 +577,7 @@ with tab3:
                    "'가장 많이 나온 얼굴 = 검색한 인물'이라는 가정이라 다른 인물이 섞일 수 있으니 미리보기에서 확인하세요.")
         if st.button("🤖 자동으로 찾아서 분석하기", type="primary", disabled=not (captions and keywords)):
             def _auto():
-                found = sources.search_cc_videos(keywords, cfg)
+                found = sources.search_cc_videos(keywords, cfg, names=[script.get("name_ja", ""), script.get("name_ko", "")])
                 if not found:
                     raise PipelineError("CC 라이선스 영상이 없습니다. 키워드를 바꾸거나 내 영상 폴더를 사용하세요.")
                 ranked = sources.rank_for_auto(found, [script.get("name_ja", ""), *keywords[:1]])
@@ -567,7 +587,7 @@ with tab3:
     elif mode.startswith("✋"):
         if st.button("🔍 CC 영상 찾기", disabled=not keywords):
             def _search():
-                found = sources.search_cc_videos(keywords, cfg)
+                found = sources.search_cc_videos(keywords, cfg, names=[script.get("name_ja", ""), script.get("name_ko", "")])
                 for c, ko in zip(found, director.translate_ko([c["title"] for c in found], cfg)):
                     c["title_ko"] = ko
                 return found
@@ -578,16 +598,22 @@ with tab3:
                     st.warning("CC 라이선스 영상이 없습니다. 키워드를 바꾸거나 내 영상 폴더를 사용하세요.")
         picked: list[dict] = []
         if ss.cands:
-            st.caption(f"후보 {len(ss.cands)}개 — 라이선스 재검증 통과(CC BY). 인물 얼굴이 잘 나오고 화면 글자가 적은 "
-                       f"영상을 최대 {max_v}개 체크하세요.")
+            n_likely = sum((c.get("assess") or {}).get("likely", False) for c in ss.cands)
+            st.caption(f"후보 {len(ss.cands)}개 (라이선스 재검증 통과) · 쓸 만해 보이는 것 {n_likely}개 — 제목·설명·길이만 본 "
+                       f"사전 판단이며, 받은 뒤 분석에서 자막·정지 화면이 더 걸러집니다. 최대 {max_v}개 체크하세요.")
+            only_likely = st.checkbox("쓸 만해 보이는 후보만 보기", value=n_likely > 0)
+            shown = [c for c in ss.cands if not only_likely or (c.get("assess") or {}).get("likely")]
             cols = st.columns(4)
-            for i, c in enumerate(ss.cands):
+            for i, c in enumerate(shown):
                 with cols[i % 4].container(border=True):
                     if c.get("thumbnail"):
                         st.image(c["thumbnail"], width="stretch")
                     st.markdown(f"[{c.get('title_ko', c['title'])[:45]}]({c['url']})")
                     mins, secs = divmod(c.get("seconds", 0), 60)
-                    st.caption(f"{c['channel']} · {mins}:{secs:02d}")
+                    a_ = c.get("assess") or {}
+                    st.caption(f"{c['channel']} · {mins}:{secs:02d}" + (" · ✅ 쓸 만해 보임" if a_.get("likely") else ""))
+                    if a_.get("flags"):
+                        st.caption(" · ".join(a_["flags"]))
                     if st.checkbox("사용", key=f"cand_{c['video_id']}"):
                         picked.append(c)
         if st.button(f"🔬 선택한 영상 분석하기 ({len(picked)}개)", type="primary",

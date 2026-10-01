@@ -122,6 +122,7 @@ python main.py make --script examples/script.json --sources-dir my_clips --plan-
 python main.py make --script ... --sources-dir my_clips --first-clip S1-03 --style youth_romance --layout tall
 python main.py make --plan output/<인물>/edit_plan.json                    # 사람이 고친 계획 그대로 렌더
 python main.py batch --file people.txt --upload                           # 비공개 업로드
+python main.py cc-check --person "本田翼/혼다 츠바사" --person 橋本環奈   # 인물별 CC 영상 미리 확인 (다운로드 없음)
 python main.py trends --query "#shorts"    # 업로드 이후 시간당 평균 조회수 (아래 주의 참고)
 ```
 
@@ -167,6 +168,14 @@ python main.py trends --query "#shorts"    # 업로드 이후 시간당 평균 �
 ### 비용
 - **Claude**: 기획안 1건 ≈ 입력 1~2K, 출력 3~6K 토큰. 검수는 선택한 문구만 보내고 캐시를 씁니다. 중계 서버의 실제 요금은 운영자 정책을 따릅니다.
 - **YouTube Data API**: 기본 일일 10,000 units. `search.list` = 100, `videos.list` = 1, `videos.insert` = 1,600.
+
+### CC 소스 찾기
+- CC로 올라온 일본 연예인 영상은 적고, 대부분 한국 언론·행사 채널이 올린 포토콜·행사 영상입니다.
+- 검색어를 자동으로 넓힙니다: 이름 / 이름+イベント·舞台挨拶·記者会見 / 한국어 이름 / 한국어 이름+포토콜 (`sources.max_keywords`), 결과 50개씩 `search_pages` 페이지, 언어 가중치 없음(`relevance_language: ""`).
+- 받기 전에 제목·설명·길이로 **사전 판단**: 이름 포함, 행사 영상(+), 닮은 사람·ものまね(제외 쪽), 프로필·まとめ 정리 영상(−), 길이·화질. 실제 내용은 받은 뒤 분석(자막·정지 화면 감지)이 최종 판단입니다.
+- ① 탭의 **CC 영상 확인**(검색어 3개 ≈ 300 units)으로 인물별 소스 양을 미리 봅니다. 같은 검색은 24시간 저장된 결과를 다시 써서 할당량을 쓰지 않습니다(`work/cache/cc_search.json`).
+- 실측 (2026-10-02, 혼다 츠바사): 예전 방식 CC 후보 44개(사전 판단 통과 23) → 확장 검색 182개(69). 사전 판단 통과가 실제로 쓸 수 있는 장면이 있다는 보장은 아닙니다.
+- **YouTube 검색은 하루 한도가 있습니다** (10,000 units와 별도로 프로젝트에 '하루 검색 횟수' 한도가 걸려 있을 수 있음 — 이 환경에서 약 20회 검색 후 429 오류). 한도를 넘으면 앱이 초기화 시각을 안내하고, API 키는 오류 메시지에 표시하지 않습니다.
 
 ### 트렌드 지표 (`main.py trends`)
 - `avg_views_per_hour_since_upload` = 총조회수 / max(업로드 후 경과 시간, 0.5시간). **최근 1시간·24시간 동안 늘어난 조회수가 아닙니다.**

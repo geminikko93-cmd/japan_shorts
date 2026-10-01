@@ -1,4 +1,4 @@
-# 2026-10-02 이 버전 조합으로 tests/ 전체(55개)와 샘플 렌더를 실행해 확인했습니다.
+# 2026-10-02 이 버전 조합으로 tests/ 전체(64개)와 샘플 렌더를 실행해 확인했습니다.
 # 환경: Python 3.14.7 / Windows 11 (10.0.26200) / FFmpeg 9.0.2 (gyan.dev full build)
 # 다른 버전은 검증하지 않았습니다. 사용법: pip install -r requirements.txt -c constraints-tested.txt
 anthropic==1.11.0
